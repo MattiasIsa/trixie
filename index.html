@@ -116,11 +116,13 @@ input, select {
 /* This round's scores */
 .slist { display: flex; flex-direction: column; gap: 6px; }
 .sitem { display: grid; grid-template-columns: 1fr auto; align-items: center; gap: 10px; padding: 8px 14px; border: 2px solid transparent; background: var(--key); border-radius: 12px; min-height: 58px; text-align: left; width: 100%; }
-.sitem.sel { border-color: var(--accent); background: var(--accent-soft); }
+.sitem.sel { border-color: var(--accent); background: var(--accent); color: var(--accent-ink); box-shadow: 0 4px 14px rgba(47, 93, 168, 0.35); }
 .sname { font-weight: 700; font-size: 1.1rem; min-width: 0; overflow-wrap: anywhere; }
+.sitem.sel .sname::before { content: "▶ "; }
 .sval { font-family: var(--font-display); font-weight: 800; font-size: 1.9rem; font-variant-numeric: tabular-nums; min-width: 2.5ch; text-align: right; }
 .sval.blank { color: var(--muted); opacity: 0.6; }
-.sitem.sel .sval::after { content: ""; display: inline-block; width: 3px; height: 1.4rem; background: var(--accent); margin-left: 3px; vertical-align: -2px; }
+.sitem.sel .sval::after { content: ""; display: inline-block; width: 3px; height: 1.4rem; background: var(--accent-ink); margin-left: 3px; vertical-align: -2px; }
+.dir { font-size: 1rem; color: var(--muted); font-weight: 700; margin-left: 4px; }
 @media (prefers-reduced-motion: no-preference) {
   .sitem.sel .sval::after { animation: blink 1s steps(1) infinite; }
   @keyframes blink { 50% { opacity: 0; } }
@@ -210,7 +212,13 @@ const SB_HEADERS = { apikey: SB_KEY, 'Content-Type': 'application/json' };
 
 const RANKS = ['3','4','5','6','7','8','9','10','Kn','D','K'];
 const WILD = ['Treor','Fyror','Femmor','Sexor','Sjuor','Åttor','Nior','Tior','Knektar','Damer','Kungar'];
-const ROUNDS = 11;
+// One game: 3 cards up to 13, a halfway scoreboard, then 12 back down to 3 (21 deals).
+const CARDS = [3,4,5,6,7,8,9,10,11,12,13,12,11,10,9,8,7,6,5,4,3];
+const TOTAL = CARDS.length;
+const HALF = 10; // index of the 13-card deal
+const rankOf = r => RANKS[CARDS[r] - 3];
+const wildOf = r => WILD[CARDS[r] - 3];
+const cardLabel = r => CARDS[r] + (r > HALF ? ' ↓' : '');
 const KEY = 'trixie-game-v1';
 const $ = s => document.querySelector(s);
 const esc = s => String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -305,7 +313,7 @@ const totals = () => sumCols(state.rounds, n());
 const decksFor = c => Math.max(2, Math.ceil((c * 13 + 20) / 52));
 const defName = i => 'Spelare ' + (i + 1);
 const blank = v => v === '' || v == null;
-const wildCard = r => `<div class="wildcard" aria-hidden="true"><span class="r">${RANKS[r]}</span><span class="s">♦</span><span class="r b">${RANKS[r]}</span></div>`;
+const wildCard = r => `<div class="wildcard" aria-hidden="true"><span class="r">${rankOf(r)}</span><span class="s">♦</span><span class="r b">${rankOf(r)}</span></div>`;
 const fmtDate = iso => { try { return new Date(iso).toLocaleDateString('sv-SE', { weekday: 'short', day: 'numeric', month: 'long', year: 'numeric' }); } catch (e) { return ''; } };
 
 function roundTable(names, rounds) {
@@ -313,8 +321,8 @@ function roundTable(names, rounds) {
   return `
   <div class="tablewrap">
     <table>
-      <thead><tr><th>Runda</th>${names.map(nm => `<th title="${esc(nm)}">${esc(nm)}</th>`).join('')}</tr></thead>
-      <tbody>${rounds.map((r, ri) => `<tr><td>${ri + 1}</td>${r.map(v => `<td>${v}</td>`).join('')}</tr>`).join('')}</tbody>
+      <thead><tr><th>Kort</th>${names.map(nm => `<th title="${esc(nm)}">${esc(nm)}</th>`).join('')}</tr></thead>
+      <tbody>${rounds.map((r, ri) => `<tr><td>${CARDS[ri] != null ? cardLabel(ri) : ri + 1}</td>${r.map(v => `<td>${v}</td>`).join('')}</tr>`).join('')}</tbody>
       <tfoot><tr><td>Summa</td>${t.map(v => `<td>${v}</td>`).join('')}</tr></tfoot>
     </table>
   </div>`;
@@ -354,8 +362,8 @@ function viewSetup() {
   </section>
   <div id="history">${viewHistory()}</div>
   <section class="panel">
-    <h2>De 11 rundorna</h2>
-    <p class="hint">Varje runda delas ett kort mer ut, och jokern är samma valör som antalet kort.</p>
+    <h2>Så går spelet</h2>
+    <p class="hint">Man börjar med 3 kort och delar ut ett kort mer varje gång upp till 13. Där visas ställningen halvvägs, och sedan går det tillbaka ner till 3 kort. Jokern är samma valör som antalet kort.</p>
     <div class="guide">
       ${RANKS.map((r, i) => `<div class="gcell"><span>Runda ${i + 1}</span><b>${i + 3} kort</b><span>Joker: ${WILD[i].toLowerCase()}</span></div>`).join('')}
     </div>
@@ -367,12 +375,12 @@ function viewRoundBar() {
   return `
   <div class="roundbar">
     <div>
-      <div class="label">Runda</div>
-      <div class="roundnum">${r + 1} <small>av ${ROUNDS}</small></div>
-      <div class="roundmeta">Dela ut ${r + 3} kort var</div>
+      <div class="label">Kort</div>
+      <div class="roundnum">${CARDS[r]} <span class="dir">${r < HALF ? '↑ uppåt' : r === HALF ? 'vändpunkt' : '↓ nedåt'}</span></div>
+      <div class="roundmeta">Dela ut ${CARDS[r]} kort var</div>
     </div>
     <div class="wildwrap">
-      <div class="wildtext">Joker<b>${WILD[r]}</b></div>
+      <div class="wildtext">Joker<b>${wildOf(r)}</b></div>
       ${wildCard(r)}
     </div>
   </div>`;
@@ -380,14 +388,14 @@ function viewRoundBar() {
 
 function viewPlay() {
   const p = state.players, d = state.draft, sel = state.sel;
-  const last = state.round + 1 === ROUNDS;
+  const last = state.round + 1 === TOTAL;
   return `
   <div class="screen">
     ${viewHeader()}
     ${viewRoundBar()}
     <div class="dealer"><span class="label">Delar ut</span><span class="who">${esc(p[state.dealer].name)}</span></div>
     <section class="panel scorepanel">
-      <h2>Poäng runda ${state.round + 1}</h2>
+      <h2>Poäng, ${CARDS[state.round]} kort</h2>
       <div class="slist">
         ${p.map((pl, i) => `
         <button class="sitem ${i === sel ? 'sel' : ''}" data-act="pick" data-i="${i}" aria-label="${esc(pl.name)}: ${blank(d[i]) ? 'inga poäng än' : d[i] + ' poäng'}">
@@ -403,7 +411,7 @@ function viewPlay() {
         <button class="key fn enter" data-act="enter">Enter ⏎</button>
       </div>
     </section>
-    <button class="btn primary full nextbtn" data-act="nextround">${last ? 'Avsluta spelet' : 'Nästa runda →'}</button>
+    <button class="btn primary full nextbtn" data-act="nextround">${last ? 'Avsluta spelet' : state.round === HALF ? 'Visa ställningen halvvägs →' : 'Nästa runda →'}</button>
   </div>
   ${viewLeaderboard()}
   <div id="history">${viewHistory()}</div>
@@ -466,18 +474,21 @@ function viewHistory() {
 function renderHistoryOnly() { const el = $('#history'); if (el) el.innerHTML = viewHistory(); }
 
 function viewDone() {
+  const half = state.phase === 'half';
   const order = standings(), winners = order.filter(o => o.place === 1);
   return `
   ${viewHeader()}
   <section class="winner">
-    <div class="label">${winners.length > 1 ? 'Delad vinst' : 'Vinnare'}</div>
+    <div class="label">${half ? 'Halvvägs – leder' : winners.length > 1 ? 'Delad vinst' : 'Vinnare'}</div>
     <div class="big">${winners.map(w => esc(w.name)).join(' & ')}</div>
-    <div class="hint">${winners[0].total} poäng efter ${ROUNDS} rundor</div>
+    <div class="hint">${winners[0].total} poäng efter ${half ? '3 till 13 kort' : 'hela vägen upp och ner'}</div>
   </section>
   ${viewLeaderboard(true)}
   <div class="row2">
     <button class="btn secondary" data-act="undo">Ändra sista rundan</button>
-    <button class="btn primary" data-act="again">Spela igen</button>
+    ${half
+      ? '<button class="btn primary" data-act="continue">Fortsätt →</button>'
+      : '<button class="btn primary" data-act="again">Spela igen</button>'}
   </div>
   <div id="history">${viewHistory()}</div>
   ${viewFooter()}`;
@@ -489,7 +500,7 @@ function viewFooter() {
 }
 
 function render() {
-  const views = { setup: viewSetup, play: viewPlay, done: viewDone };
+  const views = { setup: viewSetup, play: viewPlay, half: viewDone, done: viewDone };
   $('#app').innerHTML = (views[state.phase] || viewSetup)();
 }
 
@@ -532,8 +543,13 @@ const actions = {
   nextround() {
     state.rounds[state.round] = state.players.map((_, i) => { const v = parseInt(state.draft[i], 10); return isNaN(v) ? 0 : v; });
     state.rounds.length = state.round + 1;
-    if (state.round + 1 >= ROUNDS) { state.phase = 'done'; state.draft = []; }
+    if (state.round + 1 >= TOTAL) { state.phase = 'done'; state.draft = []; }
+    else if (state.round === HALF) { state.phase = 'half'; state.draft = []; }
     else { state.round++; state.dealer = (state.dealer + 1) % n(); beginRound(); }
+    persist(); render(); window.scrollTo(0, 0);
+  },
+  continue() {
+    state.round++; state.dealer = (state.dealer + 1) % n(); beginRound();
     persist(); render(); window.scrollTo(0, 0);
   },
   undo() {
