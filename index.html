@@ -181,8 +181,16 @@ input, select {
 }
 
 /* Went out, fixing old deals, stats */
-.keypad .outkey { grid-column: 1 / -1; background: var(--surface); color: var(--ink); border: 1px dashed var(--line); font-size: 1rem; }
-.keypad .outkey.on { background: var(--lead-soft); color: var(--lead); border: 1px solid var(--lead); }
+.keypad { grid-template-columns: repeat(4, 1fr); }
+.keypad .enter { grid-row: span 2; flex-direction: column; }
+.keypad .zero { grid-column: span 3; }
+.keypad .fn { display: flex; align-items: center; justify-content: center; gap: 2px; }
+.keypad .outkey { flex-direction: column; color: #B8860B; font-size: 1.6rem; line-height: 1; }
+.keypad .outkey span, .keypad .enter span { font-size: 0.85rem; font-weight: 700; color: inherit; }
+.keypad .enter span { font-size: 1.2rem; }
+.keypad .outkey span { color: var(--ink); }
+.keypad .outkey.on { background: var(--lead-soft); border-color: var(--lead); }
+.keypad .outkey.on span { color: var(--lead); }
 .star { color: #D4A017; margin-left: 3px; }
 .sitem.sel .star { color: #FFE28A; }
 tr.editable { cursor: pointer; }
@@ -455,11 +463,13 @@ function scoreEntry(t) {
       </div>
       ${sel == null ? '<p class="alldone">Alla poäng inskrivna. Tryck på ett namn för att ändra.</p>' : ''}
       <div class="keypad" aria-label="Sifferknappar">
-        <button class="key fn outkey ${sel != null && t.draftOut === sel ? 'on' : ''}" data-act="out" aria-pressed="${sel != null && t.draftOut === sel}">★ ${sel != null && t.draftOut === sel ? 'Gick ut (tryck för att ta bort)' : 'Gick ut'}</button>
-        ${[1,2,3,4,5,6,7,8,9].map(k => `<button class="key" data-act="digit" data-i="${k}">${k}</button>`).join('')}
+        ${[1,2,3].map(k => `<button class="key" data-act="digit" data-i="${k}">${k}</button>`).join('')}
         <button class="key fn" data-act="del" aria-label="Sudda">⌫</button>
-        <button class="key" data-act="digit" data-i="0">0</button>
-        <button class="key fn enter" data-act="enter">Enter ⏎</button>
+        ${[4,5,6].map(k => `<button class="key" data-act="digit" data-i="${k}">${k}</button>`).join('')}
+        <button class="key fn outkey ${sel != null && t.draftOut === sel ? 'on' : ''}" data-act="out" aria-pressed="${sel != null && t.draftOut === sel}" aria-label="Gick ut">★<span>Ut</span></button>
+        ${[7,8,9].map(k => `<button class="key" data-act="digit" data-i="${k}">${k}</button>`).join('')}
+        <button class="key fn enter" data-act="enter">Enter<span>⏎</span></button>
+        <button class="key zero" data-act="digit" data-i="0">0</button>
       </div>`;
 }
 
