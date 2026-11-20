@@ -180,6 +180,21 @@ input, select {
   .nextbtn { flex: none; }
 }
 
+/* Went out, fixing old deals, stats */
+.keypad .outkey { grid-column: 1 / -1; background: var(--surface); color: var(--ink); border: 1px dashed var(--line); font-size: 1rem; }
+.keypad .outkey.on { background: var(--lead-soft); color: var(--lead); border: 1px solid var(--lead); }
+.star { color: #D4A017; margin-left: 3px; }
+.sitem.sel .star { color: #FFE28A; }
+tr.editable { cursor: pointer; }
+tr.editable:hover td, tr.editable:focus td { background: var(--accent-soft); }
+tr.editable:focus { outline: none; }
+tr.editable:focus-visible td { outline: 2px solid var(--accent); outline-offset: -2px; }
+.editbar { background: var(--accent-soft); border-radius: 14px; padding: 12px 16px; }
+.editbar .roundnum { font-size: 1.8rem; margin-top: 2px; }
+.stack { display: flex; flex-direction: column; gap: 14px; }
+table.stats td:first-child { color: var(--ink); font-weight: 700; white-space: normal; overflow-wrap: anywhere; }
+table.stats tr.top1 td { color: var(--lead); }
+
 /* Leaderboard */
 .lb { display: flex; flex-direction: column; }
 .lrow { display: grid; grid-template-columns: 30px 1fr auto; gap: 10px; align-items: center; padding: 10px 4px; }
@@ -247,12 +262,15 @@ const newId = () => (crypto.randomUUID ? crypto.randomUUID() :
   'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, c => { const r = Math.random() * 16 | 0; return (c === 'x' ? r : (r & 3 | 8)).toString(16); }));
 
 function freshState() {
-  return { phase: 'setup', setup: { names: ['', ''], dealer: 0 }, gameId: null, players: [], dealer: 0, round: 0, rounds: [], draft: [], sel: 0, updatedAt: 0 };
+  return { phase: 'setup', setup: { names: ['', ''], dealer: 0 }, gameId: null, players: [], dealer: 0, round: 0, rounds: [], outs: [], draft: [], draftOut: null, sel: 0, edit: null, updatedAt: 0 };
 }
 function normalize(s) {
   if (s.phase === 'score') s.phase = 'play';
   if (s.phase === 'play' && (!Array.isArray(s.draft) || s.draft.length !== s.players.length)) s.draft = s.players.map(() => '');
   if (s.sel === undefined) s.sel = 0;
+  if (!Array.isArray(s.outs)) s.outs = [];
+  if (s.draftOut === undefined) s.draftOut = null;
+  if (s.edit === undefined) s.edit = null;
   if (s.phase !== 'setup' && !s.gameId) s.gameId = newId();
   return s;
 }
@@ -308,7 +326,7 @@ setInterval(() => { if (dirty && !saving) flush(); }, 30000);
 
 async function loadHistory() {
   try {
-    const r = await fetch(SB_TABLE + '?select=id,created_at,players,rounds,winner&finished=eq.true&order=created_at.desc&limit=50', { headers: SB_HEADERS });
+    const r = await fetch(SB_TABLE + '?select=id,created_at,players,rounds,winner,outs:state->outs&finished=eq.true&order=created_at.desc&limit=200', { headers: SB_HEADERS });
     if (!r.ok) throw new Error('HTTP ' + r.status);
     history.games = await r.json(); history.error = false;
     if (!dirty) setStatus('Sparat online');
@@ -334,16 +352,26 @@ const totals = () => sumCols(state.rounds, n());
 const decksFor = c => Math.max(2, Math.ceil((c * 13 + 20) / 52));
 const defName = i => 'Spelare ' + (i + 1);
 const blank = v => v === '' || v == null;
+const toScores = draft => draft.map(v => { const x = parseInt(v, 10); return isNaN(x) ? 0 : x; });
+// Who went out: the marked player, or the only player with 0 points
+function outFor(scores, marked) {
+  if (marked != null) return marked;
+  const zeros = scores.map((v, i) => v === 0 ? i : -1).filter(i => i >= 0);
+  return zeros.length === 1 ? zeros[0] : null;
+}
 const wildCard = r => `<div class="wildcard" aria-hidden="true"><span class="r">${rankOf(r)}</span><span class="s">♦</span><span class="r b">${rankOf(r)}</span></div>`;
 const fmtDate = iso => { try { return new Date(iso).toLocaleDateString('sv-SE', { weekday: 'short', day: 'numeric', month: 'long', year: 'numeric' }); } catch (e) { return ''; } };
+const STAR = '<span class="star" aria-label="gick ut">★</span>';
 
-function roundTable(names, rounds) {
+function roundTable(names, rounds, outs, editable) {
   const t = sumCols(rounds, names.length);
+  outs = Array.isArray(outs) ? outs : [];
   return `
+  ${editable ? '<p class="hint">Tryck på en rad för att ändra den. ★ = gick ut.</p>' : ''}
   <div class="tablewrap">
     <table>
       <thead><tr><th>Kort</th>${names.map(nm => `<th title="${esc(nm)}">${esc(nm)}</th>`).join('')}</tr></thead>
-      <tbody>${rounds.map((r, ri) => `<tr><td>${CARDS[ri] != null ? cardLabel(ri) : ri + 1}</td>${r.map(v => `<td>${v}</td>`).join('')}</tr>`).join('')}</tbody>
+      <tbody>${rounds.map((r, ri) => `<tr${editable ? ` class="editable" data-act="editdeal" data-i="${ri}" tabindex="0" aria-label="Ändra ${CARDS[ri] != null ? CARDS[ri] + ' kort' : 'giv ' + (ri + 1)}"` : ''}><td>${CARDS[ri] != null ? cardLabel(ri) : ri + 1}</td>${r.map((v, i) => `<td>${v}${outs[ri] === i ? STAR : ''}</td>`).join('')}</tr>`).join('')}</tbody>
       <tfoot><tr><td>Summa</td>${t.map(v => `<td>${v}</td>`).join('')}</tr></tfoot>
     </table>
   </div>`;
@@ -388,7 +416,7 @@ function viewSetup() {
     <p class="hint">${names.length} spelare: blanda ihop ${decksFor(names.length)} kortlekar.</p>
     <button class="btn primary full" data-act="start">Starta spelet</button>
   </section>
-  <div id="history">${viewHistory()}</div>
+  <div id="history" class="stack">${viewStats()}${viewHistory()}</div>
   <section class="panel">
     <h2>Så går spelet</h2>
     <p class="hint">Man börjar med 3 kort och delar ut ett kort mer varje gång upp till 13. Där visas ställningen halvvägs, och sedan går det tillbaka ner till 3 kort. Jokern är samma valör som antalet kort.</p>
@@ -414,36 +442,63 @@ function viewRoundBar() {
   </div>`;
 }
 
-function viewPlay() {
-  const p = state.players, d = state.draft, sel = state.sel;
-  const last = state.round + 1 === TOTAL;
+// Score rows + numpad, shared by the current deal and by fixing an old deal
+function scoreEntry(t) {
+  const p = state.players, d = t.draft, sel = t.sel;
   return `
-  <div class="screen">
-    ${viewHeader()}
-    ${viewRoundBar()}
-    <div class="dealer"><span class="label">Delar ut</span><span class="who">${esc(p[state.dealer].name)}</span></div>
-    <section class="panel scorepanel">
-      <h2>Poäng, ${CARDS[state.round]} kort</h2>
       <div class="slist">
         ${p.map((pl, i) => `
-        <button class="sitem ${i === sel ? 'sel' : ''}" data-act="pick" data-i="${i}" aria-label="${esc(pl.name)}: ${blank(d[i]) ? 'inga poäng än' : d[i] + ' poäng'}">
-          <span class="sname">${esc(pl.name)}</span>
+        <button class="sitem ${i === sel ? 'sel' : ''}" data-act="pick" data-i="${i}" aria-label="${esc(pl.name)}: ${blank(d[i]) ? 'inga poäng än' : d[i] + ' poäng'}${t.draftOut === i ? ', gick ut' : ''}">
+          <span class="sname">${esc(pl.name)}${t.draftOut === i ? ' ' + STAR : ''}</span>
           <span class="sval ${blank(d[i]) && i !== sel ? 'blank' : ''}">${blank(d[i]) ? (i === sel ? '' : '–') : esc(d[i])}</span>
         </button>`).join('')}
       </div>
       ${sel == null ? '<p class="alldone">Alla poäng inskrivna. Tryck på ett namn för att ändra.</p>' : ''}
       <div class="keypad" aria-label="Sifferknappar">
+        <button class="key fn outkey ${sel != null && t.draftOut === sel ? 'on' : ''}" data-act="out" aria-pressed="${sel != null && t.draftOut === sel}">★ ${sel != null && t.draftOut === sel ? 'Gick ut (tryck för att ta bort)' : 'Gick ut'}</button>
         ${[1,2,3,4,5,6,7,8,9].map(k => `<button class="key" data-act="digit" data-i="${k}">${k}</button>`).join('')}
         <button class="key fn" data-act="del" aria-label="Sudda">⌫</button>
         <button class="key" data-act="digit" data-i="0">0</button>
         <button class="key fn enter" data-act="enter">Enter ⏎</button>
-      </div>
+      </div>`;
+}
+
+function viewPlay() {
+  const last = state.round + 1 === TOTAL;
+  return `
+  <div class="screen">
+    ${viewHeader()}
+    ${viewRoundBar()}
+    <div class="dealer"><span class="label">Delar ut</span><span class="who">${esc(state.players[state.dealer].name)}</span></div>
+    <section class="panel scorepanel">
+      <h2>Poäng, ${CARDS[state.round]} kort</h2>
+      ${scoreEntry(state)}
     </section>
     <button class="btn primary full nextbtn" data-act="nextround">${last ? 'Avsluta spelet' : state.round === HALF ? 'Visa ställningen halvvägs →' : 'Nästa runda →'}</button>
   </div>
   ${viewLeaderboard()}
-  <div id="history">${viewHistory()}</div>
+  <div id="history" class="stack">${viewStats()}${viewHistory()}</div>
   ${viewFooter()}`;
+}
+
+function viewEdit() {
+  const e = state.edit;
+  return `
+  <div class="screen">
+    ${viewHeader()}
+    <div class="editbar">
+      <div class="label">Ändrar en tidigare giv</div>
+      <div class="roundnum">${CARDS[e.ri]} kort <span class="dir">${e.ri < HALF ? '↑ uppåt' : e.ri === HALF ? 'vändpunkt' : '↓ nedåt'}</span></div>
+    </div>
+    <section class="panel scorepanel">
+      <h2>Rätta poängen</h2>
+      ${scoreEntry(e)}
+    </section>
+    <div class="row2 nextbtn">
+      <button class="btn secondary" data-act="canceledit">Avbryt</button>
+      <button class="btn primary" data-act="saveedit">Spara ändring</button>
+    </div>
+  </div>`;
 }
 
 function standings() {
@@ -461,7 +516,7 @@ function viewLeaderboard(forceAll) {
   const all = forceAll || showAll;
   return `
   <section class="panel">
-    <div class="headrow"><h2>Ställning</h2>${state.phase === 'play' ? '<button class="link" data-act="undo">Ändra förra rundan</button>' : ''}</div>
+    <div class="headrow"><h2>Ställning</h2>${state.phase === 'play' ? `<button class="link" data-act="editdeal" data-i="${R.length - 1}">Ändra förra rundan</button>` : ''}</div>
     <div class="lb">
       ${order.map(o => `
       <div class="lrow ${o.place === 1 ? 'first' : ''}">
@@ -470,9 +525,41 @@ function viewLeaderboard(forceAll) {
         <span class="ltotal">${o.total}</span>
       </div>`).join('')}
     </div>
-    ${all ? roundTable(state.players.map(p => p.name), R) : ''}
+    ${all ? roundTable(state.players.map(p => p.name), R, state.outs, true) : ''}
     ${forceAll ? '' : `<button class="btn secondary full" data-act="toggleall" aria-expanded="${all}">${all ? 'Dölj rundorna ▲' : `Visa alla rundor (${R.length}) ▼`}</button>`}
   </section>`;
+}
+
+function viewStats() {
+  const full = history.games.filter(g => Array.isArray(g.rounds) && g.rounds.length === TOTAL && Array.isArray(g.players));
+  let body;
+  if (history.loading) body = '<p class="hint">Hämtar statistik…</p>';
+  else if (!full.length) body = '<p class="hint">Statistiken visas när ni har spelat klart ett helt spel.</p>';
+  else {
+    const by = new Map();
+    full.forEach(g => {   // newest first, so the first spelling we meet is the latest one
+      const t = sumCols(g.rounds, g.players.length), best = Math.min(...t);
+      const outs = Array.isArray(g.outs) ? g.outs : [];
+      g.players.forEach((nm, i) => {
+        const key = String(nm).trim().toLowerCase();
+        if (!by.has(key)) by.set(key, { name: nm, games: 0, wins: 0, sum: 0, best: Infinity, outs: 0 });
+        const s = by.get(key);
+        s.games++; s.sum += t[i]; s.best = Math.min(s.best, t[i]);
+        if (t[i] === best) s.wins++;
+        s.outs += outs.filter(o => o === i).length;
+      });
+    });
+    const rows = [...by.values()].sort((a, b) => b.wins - a.wins || (a.sum / a.games) - (b.sum / b.games));
+    body = `
+    <p class="hint">Från ${full.length} avslutade spel. Lägst poäng är bäst.</p>
+    <div class="tablewrap">
+      <table class="stats">
+        <thead><tr><th>Spelare</th><th>Spel</th><th>Vinster</th><th>Snitt</th><th>Bästa</th><th>★ Ut</th></tr></thead>
+        <tbody>${rows.map((s, k) => `<tr${k === 0 ? ' class="top1"' : ''}><td>${esc(s.name)}</td><td>${s.games}</td><td>${s.wins}</td><td>${Math.round(s.sum / s.games)}</td><td>${s.best}</td><td>${s.outs}</td></tr>`).join('')}</tbody>
+      </table>
+    </div>`;
+  }
+  return `<section class="panel"><h2>Statistik</h2>${body}</section>`;
 }
 
 function viewHistory() {
@@ -495,11 +582,11 @@ function viewHistory() {
         <span class="gwin">Vinnare: <b>${esc(g.winner || '')}</b> (${best})</span>
         <span class="gall">${all}</span>
       </button>
-      ${open ? `<div class="gdetail">${roundTable(names, rounds)}</div>` : ''}
+      ${open ? `<div class="gdetail">${roundTable(names, rounds, g.outs, false)}</div>` : ''}
     </div>`; }).join('')}</div>`;
   return `<section class="panel"><h2>Tidigare spel</h2>${body}</section>`;
 }
-function renderHistoryOnly() { const el = $('#history'); if (el) el.innerHTML = viewHistory(); }
+function renderHistoryOnly() { const el = $('#history'); if (el) el.innerHTML = viewStats() + viewHistory(); }
 
 function viewDone() {
   const half = state.phase === 'half';
@@ -513,12 +600,12 @@ function viewDone() {
   </section>
   ${viewLeaderboard(true)}
   <div class="row2">
-    <button class="btn secondary" data-act="undo">Ändra sista rundan</button>
+    <button class="btn secondary" data-act="editdeal" data-i="${state.rounds.length - 1}">Ändra sista rundan</button>
     ${half
       ? '<button class="btn primary" data-act="continue">Fortsätt →</button>'
       : '<button class="btn primary" data-act="again">Spela igen</button>'}
   </div>
-  <div id="history">${viewHistory()}</div>
+  <div id="history" class="stack">${viewStats()}${viewHistory()}</div>
   ${viewFooter()}`;
 }
 
@@ -528,12 +615,20 @@ function viewFooter() {
 }
 
 function render() {
+  if (state.edit && state.phase !== 'setup') { $('#app').innerHTML = viewEdit(); return; }
   const views = { setup: viewSetup, play: viewPlay, half: viewDone, done: viewDone };
   $('#app').innerHTML = (views[state.phase] || viewSetup)();
 }
 
 /* ---------- actions ---------- */
-function beginRound() { state.draft = state.players.map(() => ''); state.sel = 0; replaceNext = false; state.phase = 'play'; }
+const tgt = () => state.edit || state;  // whichever scores the numpad is filling in
+function beginRound() { state.draft = state.players.map(() => ''); state.draftOut = null; state.sel = 0; replaceNext = false; state.phase = 'play'; }
+function advance(t, i) {
+  const nextBlank = t.draft.findIndex((v, k) => k > i && blank(v));
+  const anyBlank = t.draft.findIndex(v => blank(v));
+  t.sel = nextBlank >= 0 ? nextBlank : (anyBlank >= 0 ? anyBlank : null);
+  replaceNext = false;
+}
 const actions = {
   add() { state.setup.names.push(''); persist(); render(); $('#name-' + (state.setup.names.length - 1)).focus(); },
   rm(i) { const s = state.setup; if (s.names.length <= 2) return; s.names.splice(i, 1); if (s.dealer >= s.names.length) s.dealer = 0; persist(); render(); },
@@ -541,36 +636,43 @@ const actions = {
     const s = state.setup;
     state.gameId = newId();
     state.players = s.names.map((v, i) => ({ name: v.trim() || defName(i) }));
-    state.dealer = s.dealer; state.round = 0; state.rounds = [];
+    state.dealer = s.dealer; state.round = 0; state.rounds = []; state.outs = []; state.edit = null;
     beginRound(); persist(); render(); wake(); window.scrollTo(0, 0);
   },
-  pick(i) { state.sel = i; replaceNext = true; persist(); render(); },
+  pick(i) { tgt().sel = i; replaceNext = true; persist(); render(); },
   digit(k) {
-    if (state.sel == null) return;
-    const i = state.sel; let v = state.draft[i] || '';
+    const t = tgt(); if (t.sel == null) return;
+    const i = t.sel; let v = t.draft[i] || '';
     if (v === '0' || replaceNext) v = '';
     replaceNext = false;
     if (v.length >= 3) return;
-    state.draft[i] = v + k; persist(); render();
+    t.draft[i] = v + k;
+    if (t.draftOut === i && t.draft[i] !== '0') t.draftOut = null; // someone who went out has 0 points
+    persist(); render();
   },
   del() {
-    if (state.sel == null) return;
+    const t = tgt(); if (t.sel == null) return;
     replaceNext = false;
-    state.draft[state.sel] = (state.draft[state.sel] || '').slice(0, -1); persist(); render();
+    t.draft[t.sel] = (t.draft[t.sel] || '').slice(0, -1); persist(); render();
   },
   enter() {
-    if (state.sel == null) return;
-    const i = state.sel;
-    if (blank(state.draft[i])) state.draft[i] = '0';
-    const nextBlank = state.draft.findIndex((v, k) => k > i && blank(v));
-    const anyBlank = state.draft.findIndex(v => blank(v));
-    state.sel = nextBlank >= 0 ? nextBlank : (anyBlank >= 0 ? anyBlank : null);
-    replaceNext = false;
+    const t = tgt(); if (t.sel == null) return;
+    const i = t.sel;
+    if (blank(t.draft[i])) t.draft[i] = '0';
+    advance(t, i); persist(); render();
+  },
+  out() {
+    const t = tgt(); if (t.sel == null) return;
+    const i = t.sel;
+    if (t.draftOut === i) { t.draftOut = null; replaceNext = false; }
+    else { t.draftOut = i; t.draft[i] = '0'; advance(t, i); }
     persist(); render();
   },
   nextround() {
-    state.rounds[state.round] = state.players.map((_, i) => { const v = parseInt(state.draft[i], 10); return isNaN(v) ? 0 : v; });
-    state.rounds.length = state.round + 1;
+    const scores = toScores(state.draft);
+    state.rounds[state.round] = scores;
+    state.outs[state.round] = outFor(scores, state.draftOut);
+    state.rounds.length = state.round + 1; state.outs.length = state.round + 1;
     if (state.round + 1 >= TOTAL) { state.phase = 'done'; state.draft = []; }
     else if (state.round === HALF) { state.phase = 'half'; state.draft = []; }
     else { state.round++; state.dealer = (state.dealer + 1) % n(); beginRound(); }
@@ -580,14 +682,19 @@ const actions = {
     state.round++; state.dealer = (state.dealer + 1) % n(); beginRound();
     persist(); render(); window.scrollTo(0, 0);
   },
-  undo() {
-    if (!state.rounds.length) return;
-    if (state.phase === 'play') { state.round--; state.dealer = (state.dealer - 1 + n()) % n(); }
-    state.draft = state.rounds[state.round].map(String);
-    state.rounds.length = state.round;
-    state.sel = 0; replaceNext = true; state.phase = 'play';
-    persist(); render(); window.scrollTo(0, 0);
+  editdeal(ri) {
+    if (ri == null || !state.rounds[ri]) return;
+    state.edit = { ri, draft: state.rounds[ri].map(String), draftOut: state.outs[ri] ?? null, sel: 0 };
+    replaceNext = true; persist(); render(); window.scrollTo(0, 0);
   },
+  saveedit() {
+    const e = state.edit; if (!e) return;
+    const scores = toScores(e.draft);
+    state.rounds[e.ri] = scores;
+    state.outs[e.ri] = outFor(scores, e.draftOut);
+    state.edit = null; persist(); render(); window.scrollTo(0, 0);
+  },
+  canceledit() { state.edit = null; persist(); render(); window.scrollTo(0, 0); },
   toggleall() { showAll = !showAll; render(); },
   theme() {
     const t = isDark() ? 'light' : 'dark';
@@ -599,7 +706,7 @@ const actions = {
   opengame(_, el) { const id = el.dataset.id; history.open = history.open === id ? null : id; renderHistoryOnly(); },
   again() {
     state.gameId = newId();
-    state.dealer = (state.dealer + 1) % n(); state.round = 0; state.rounds = []; showAll = false;
+    state.dealer = (state.dealer + 1) % n(); state.round = 0; state.rounds = []; state.outs = []; state.edit = null; showAll = false;
     beginRound(); persist(); render(); window.scrollTo(0, 0);
   },
   newgame() {
@@ -639,7 +746,8 @@ document.addEventListener('keydown', e => {
   if (e.key === 'Enter' && t.dataset && t.dataset.name != null) {
     e.preventDefault(); const nx = $('#name-' + (+t.dataset.name + 1)); if (nx) nx.focus(); else actions.add(); return;
   }
-  if (state.phase === 'play' && !(t instanceof HTMLInputElement)) {
+  if (e.key === 'Enter' && t instanceof HTMLTableRowElement && t.dataset.act === 'editdeal') { actions.editdeal(+t.dataset.i); e.preventDefault(); return; }
+  if ((state.phase === 'play' || state.edit) && !(t instanceof HTMLInputElement)) {
     if (/^[0-9]$/.test(e.key)) { actions.digit(+e.key); e.preventDefault(); }
     else if (e.key === 'Backspace') { actions.del(); e.preventDefault(); }
     else if (e.key === 'Enter' && !(t instanceof HTMLButtonElement)) { actions.enter(); e.preventDefault(); }
