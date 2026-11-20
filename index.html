@@ -155,7 +155,7 @@ input, select {
 .key.fn { font-family: var(--font-body); font-size: 1.05rem; font-weight: 700; }
 .key.enter { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
 .key:active { transform: scale(0.97); }
-.alldone { text-align: center; color: var(--lead); font-weight: 700; margin: 0; }
+.warnbtn { color: var(--red); border-color: var(--red); font-size: 0.95rem; }
 
 /* First screen: header to "Nästa runda" fills exactly one phone screen */
 .screen { display: flex; flex-direction: column; gap: 10px; }
@@ -291,10 +291,13 @@ let history = { loading: true, error: false, games: [], open: null };
 let saveTimer = null, saving = false, again = false, dirty = false;
 let statusText = 'Ansluter…', statusWarn = false;
 function setStatus(t, warn) { statusText = t; statusWarn = !!warn; const el = $('#status'); if (el) { el.textContent = t; el.classList.toggle('warn', statusWarn); } }
+function saveLocal() { try { localStorage.setItem(KEY, JSON.stringify(state)); } catch (e) {} }
 function persist() {
   state.updatedAt = Date.now();
-  try { localStorage.setItem(KEY, JSON.stringify(state)); } catch (e) {}
-  if (state.gameId && state.phase !== 'setup') { dirty = true; clearTimeout(saveTimer); saveTimer = setTimeout(flush, 700); }
+  const online = state.gameId && state.phase !== 'setup';
+  if (online) state.unsynced = true;   // remembered across reloads until Supabase has it
+  saveLocal();
+  if (online) { dirty = true; clearTimeout(saveTimer); saveTimer = setTimeout(flush, 700); }
 }
 function winnerText() {
   if (state.phase !== 'done') return null;
@@ -313,18 +316,26 @@ async function flush() {
     winner: winnerText(),
     state: state
   };
+  const sentAt = state.updatedAt;
+  let r = null;
   try {
-    const r = await fetch(SB_TABLE + '?on_conflict=id', {
+    r = await fetch(SB_TABLE + '?on_conflict=id', {
       method: 'POST',
       headers: { ...SB_HEADERS, Prefer: 'resolution=merge-duplicates,return=minimal' },
       body: JSON.stringify(body)
     });
-    if (!r.ok) throw new Error('HTTP ' + r.status);
+  } catch (e) { r = null; }
+  if (r && r.ok) {
+    if (state.updatedAt === sentAt) { state.unsynced = false; saveLocal(); }
     setStatus('Sparat online');
     if (wasDone) loadHistory();
-  } catch (e) {
-    dirty = true;
-    setStatus('Sparat i telefonen – sparas online när nätet är tillbaka', true);
+  } else if (r && r.status >= 400 && r.status < 500) {
+    // Supabase refused it (a finished game is locked after 24 hours). Retrying won't help.
+    state.unsynced = false; saveLocal();
+    setStatus('Låst online – sparat i telefonen', true);
+  } else {
+    dirty = true;   // no connection or a server hiccup: try again later
+    setStatus('Sparat i telefonen', true);
   }
   saving = false;
   if (again) { again = false; flush(); }
@@ -337,10 +348,10 @@ async function loadHistory() {
     const r = await fetch(SB_TABLE + '?select=id,created_at,players,rounds,winner,outs:state->outs&finished=eq.true&order=created_at.desc&limit=200', { headers: SB_HEADERS });
     if (!r.ok) throw new Error('HTTP ' + r.status);
     history.games = await r.json(); history.error = false;
-    if (!dirty) setStatus('Sparat online');
+    if (!dirty && !statusWarn) setStatus(state.gameId && state.phase !== 'setup' ? 'Sparat online' : 'Online');
   } catch (e) {
     history.error = true;
-    if (!dirty) setStatus('Ingen anslutning – sparas i telefonen', true);
+    if (!dirty) setStatus('Ingen anslutning', true);
   }
   history.loading = false;
   renderHistoryOnly();
@@ -429,7 +440,7 @@ function viewSetup() {
     <h2>Så går spelet</h2>
     <p class="hint">Man börjar med 3 kort och delar ut ett kort mer varje gång upp till 13. Där visas ställningen halvvägs, och sedan går det tillbaka ner till 3 kort. Jokern är samma valör som antalet kort.</p>
     <div class="guide">
-      ${RANKS.map((r, i) => `<div class="gcell"><span>Runda ${i + 1}</span><b>${i + 3} kort</b><span>Joker: ${WILD[i].toLowerCase()}</span></div>`).join('')}
+      ${RANKS.map((r, i) => `<div class="gcell"><b>${i + 3} kort</b><span>Joker: ${WILD[i].toLowerCase()}</span></div>`).join('')}
     </div>
   </section>`;
 }
@@ -483,7 +494,7 @@ function viewPlay() {
       <h2>Poäng, ${CARDS[state.round]} kort</h2>
       ${scoreEntry(state)}
     </section>
-    <button class="btn primary full nextbtn" data-act="nextround">${last ? 'Avsluta spelet' : state.round === HALF ? 'Visa ställningen halvvägs →' : 'Nästa runda →'}</button>
+    <button class="btn ${confirmSkip ? 'secondary warnbtn' : 'primary'} full nextbtn" data-act="nextround">${confirmSkip ? 'Inga poäng än – tryck igen för att hoppa över' : last ? 'Avsluta spelet' : state.round === HALF ? 'Visa ställningen halvvägs →' : 'Nästa runda →'}</button>
   </div>
   ${viewLeaderboard()}
   <div id="history" class="stack">${viewStats()}${viewHistory()}</div>
@@ -631,6 +642,7 @@ function render() {
 
 /* ---------- actions ---------- */
 const tgt = () => state.edit || state;  // whichever scores the numpad is filling in
+let confirmSkip = false, skipTimer = null;
 function beginRound() { state.draft = state.players.map(() => ''); state.draftOut = null; state.sel = 0; replaceNext = false; state.phase = 'play'; }
 function advance(t, i) {
   const nextBlank = t.draft.findIndex((v, k) => k > i && blank(v));
@@ -678,6 +690,13 @@ const actions = {
     persist(); render();
   },
   nextround() {
+    // A deal where nobody has a score is almost always a double tap: ask for a second tap first
+    if (state.draft.every(blank) && !confirmSkip) {
+      confirmSkip = true; render();
+      clearTimeout(skipTimer); skipTimer = setTimeout(() => { confirmSkip = false; render(); }, 4000);
+      return;
+    }
+    confirmSkip = false; clearTimeout(skipTimer);
     const scores = toScores(state.draft);
     state.rounds[state.round] = scores;
     state.outs[state.round] = outFor(scores, state.draftOut);
@@ -736,6 +755,7 @@ const actions = {
 document.addEventListener('click', e => {
   const b = e.target.closest('[data-act]');
   if (!b || b.disabled) return;
+  if (confirmSkip && b.dataset.act !== 'nextround') { confirmSkip = false; clearTimeout(skipTimer); }
   const fn = actions[b.dataset.act];
   if (fn) fn(b.dataset.i != null ? +b.dataset.i : undefined, b);
 });
@@ -765,7 +785,7 @@ document.addEventListener('keydown', e => {
 
 render();
 loadHistory();
-if (state.gameId && state.phase !== 'setup') { dirty = true; flush(); }
+if (state.gameId && state.phase !== 'setup' && state.unsynced) { dirty = true; flush(); }
 </script>
 </body>
 </html>
