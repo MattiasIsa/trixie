@@ -461,7 +461,6 @@ function scoreEntry(t) {
           <span class="sval ${blank(d[i]) && i !== sel ? 'blank' : ''}">${blank(d[i]) ? (i === sel ? '' : '–') : esc(d[i])}</span>
         </button>`).join('')}
       </div>
-      ${sel == null ? '<p class="alldone">Alla poäng inskrivna. Tryck på ett namn för att ändra.</p>' : ''}
       <div class="keypad" aria-label="Sifferknappar">
         ${[1,2,3].map(k => `<button class="key" data-act="digit" data-i="${k}">${k}</button>`).join('')}
         <button class="key fn" data-act="del" aria-label="Sudda">⌫</button>
