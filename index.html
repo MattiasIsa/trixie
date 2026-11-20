@@ -14,7 +14,7 @@
 (function () {
   var t = null;
   try { t = localStorage.getItem('trixie-theme'); } catch (e) {}
-  if (t !== 'light' && t !== 'dark') t = (window.matchMedia && matchMedia('(prefers-color-scheme: dark)').matches) ? 'dark' : 'light';
+  if (t !== 'light' && t !== 'dark') t = 'light'; // light is the default; dark only when chosen
   document.documentElement.setAttribute('data-theme', t);
   var m = document.getElementById('themeColor'); if (m) m.setAttribute('content', t === 'dark' ? '#131922' : '#EDF1F5');
 })();
