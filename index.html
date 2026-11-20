@@ -1,0 +1,603 @@
+<!doctype html>
+<html lang="sv">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Trixie</title>
+<meta name="description" content="Poängräknare för kortspelet Trixie">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Trixie">
+<meta name="theme-color" content="#EDF1F5" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#131922" media="(prefers-color-scheme: dark)">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%232F5DA8'/%3E%3Cpath d='M32 10 L50 32 L32 54 L14 32 Z' fill='%23fff'/%3E%3C/svg%3E">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,700;12..96,800&family=Inter:wght@500;600;700&display=swap">
+<style>
+/* Layout: one phone column. First screen = round info, dealer, this round's scores + numpad, next round.
+   Below it: leaderboard and past games. */
+:root {
+  --bg: #EDF1F5;
+  --surface: #FFFFFF;
+  --key: #F3F6F9;
+  --ink: #1C2533;
+  --muted: #556173;
+  --line: #CBD4DF;
+  --accent: #2F5DA8;
+  --accent-ink: #FFFFFF;
+  --accent-soft: #E1EAF8;
+  --red: #C23345;
+  --lead: #2B7A4B;
+  --lead-soft: #DFF1E6;
+  --font-display: "Bricolage Grotesque", "Segoe UI", system-ui, sans-serif;
+  --font-body: "Inter", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --pt: max(12px, env(safe-area-inset-top, 0px));
+  --pb: max(24px, env(safe-area-inset-bottom, 0px));
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #131922; --surface: #1C2431; --key: #252F3E; --ink: #ECF0F5; --muted: #AEB9C7; --line: #34414F;
+    --accent: #86ABEE; --accent-ink: #0F1A2C; --accent-soft: #24365A; --red: #F07484;
+    --lead: #7FD3A0; --lead-soft: #1E3A2B; color-scheme: dark;
+  }
+}
+* { box-sizing: border-box; }
+html { -webkit-text-size-adjust: 100%; }
+[hidden] { display: none !important; }
+body {
+  margin: 0;
+  background: var(--bg); color: var(--ink); font-family: var(--font-body); font-size: 17px; line-height: 1.4; font-weight: 500;
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+  padding-top: var(--pt);
+  padding-bottom: var(--pb);
+  -webkit-tap-highlight-color: transparent;
+}
+.wrap { width: 100%; max-width: 480px; margin: 0 auto; }
+#app { display: flex; flex-direction: column; gap: 14px; width: 100%; }
+header.top { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.brand { font-family: var(--font-display); font-weight: 800; font-size: 1.5rem; letter-spacing: -0.02em; display: flex; align-items: center; gap: 8px; }
+.brand .pip { color: var(--red); }
+.status { color: var(--muted); font-size: 0.8rem; text-align: right; }
+.status.warn { color: var(--red); }
+h2 { font-family: var(--font-display); font-weight: 800; font-size: 1.25rem; margin: 0; text-wrap: balance; }
+.panel { background: var(--surface); border: 1px solid var(--line); border-radius: 16px; padding: 16px; display: flex; flex-direction: column; gap: 12px; }
+.hint { color: var(--muted); font-size: 0.95rem; margin: 0; }
+.label { text-transform: uppercase; letter-spacing: 0.08em; font-size: 0.78rem; font-weight: 700; color: var(--muted); }
+button { font: inherit; color: inherit; cursor: pointer; border: 0; background: none; }
+button:focus-visible, input:focus-visible, select:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
+.btn { min-height: 54px; padding: 0 18px; border-radius: 12px; font-weight: 700; font-size: 1.05rem; display: inline-flex; align-items: center; justify-content: center; gap: 8px; text-align: center; }
+.primary { background: var(--accent); color: var(--accent-ink); }
+.secondary { background: var(--surface); color: var(--ink); border: 1px solid var(--line); }
+.link { color: var(--accent); font-weight: 700; min-height: 44px; padding: 0 4px; }
+.link.quiet { color: var(--muted); }
+.link.danger { color: var(--red); }
+.full { width: 100%; }
+input, select {
+  font: inherit; font-size: 18px; color: var(--ink); background: var(--bg); border: 1px solid var(--line);
+  border-radius: 10px; min-height: 52px; padding: 0 12px; width: 100%; min-width: 0;
+}
+
+/* Setup */
+.names { display: flex; flex-direction: column; gap: 10px; }
+.namerow { display: grid; grid-template-columns: 26px 1fr 48px; gap: 8px; align-items: center; }
+.seat { font-variant-numeric: tabular-nums; color: var(--muted); font-weight: 700; text-align: center; }
+.rm { width: 48px; height: 48px; border-radius: 10px; border: 1px solid var(--line); font-size: 1.5rem; line-height: 1; color: var(--muted); }
+.rm:disabled { opacity: 0.3; cursor: default; }
+.field { display: flex; flex-direction: column; gap: 6px; }
+.guide { display: grid; grid-template-columns: repeat(auto-fill, minmax(96px, 1fr)); gap: 8px; }
+.gcell { border: 1px solid var(--line); border-radius: 10px; padding: 8px 10px; display: flex; flex-direction: column; }
+.gcell b { font-family: var(--font-display); font-size: 1.05rem; }
+.gcell span { font-size: 0.82rem; color: var(--muted); }
+
+/* Round header */
+.roundbar { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.roundnum { font-family: var(--font-display); font-weight: 800; font-size: 2.3rem; line-height: 1; letter-spacing: -0.02em; }
+.roundnum small { font-size: 1.05rem; color: var(--muted); font-weight: 700; }
+.roundmeta { font-size: 1.05rem; font-weight: 700; margin-top: 6px; }
+.wildwrap { display: flex; align-items: center; gap: 12px; }
+.wildtext { text-align: right; font-size: 0.85rem; color: var(--muted); line-height: 1.2; font-weight: 700; }
+.wildtext b { display: block; color: var(--ink); font-size: 1.25rem; font-family: var(--font-display); }
+.wildcard {
+  width: 62px; height: 86px; flex: none; border-radius: 8px; background: #FFFFFF; border: 1px solid #B9C2CE;
+  position: relative; display: flex; align-items: center; justify-content: center; color: #C23345;
+  box-shadow: 0 2px 6px rgba(20, 30, 45, 0.15);
+}
+.wildcard .r { position: absolute; top: 4px; left: 6px; font-family: var(--font-display); font-weight: 800; font-size: 1.05rem; line-height: 1; }
+.wildcard .r.b { top: auto; left: auto; bottom: 4px; right: 6px; transform: rotate(180deg); }
+.wildcard .s { font-size: 1.9rem; }
+
+/* Dealer line */
+.dealer { display: flex; align-items: baseline; gap: 12px; background: var(--accent-soft); border-radius: 14px; padding: 10px 16px; }
+.dealer .who { font-family: var(--font-display); font-weight: 800; font-size: 1.4rem; line-height: 1.1; overflow-wrap: anywhere; min-width: 0; }
+
+/* This round's scores */
+.slist { display: flex; flex-direction: column; gap: 6px; }
+.sitem { display: grid; grid-template-columns: 1fr auto; align-items: center; gap: 10px; padding: 8px 14px; border: 2px solid transparent; background: var(--key); border-radius: 12px; min-height: 58px; text-align: left; width: 100%; }
+.sitem.sel { border-color: var(--accent); background: var(--accent-soft); }
+.sname { font-weight: 700; font-size: 1.1rem; min-width: 0; overflow-wrap: anywhere; }
+.sval { font-family: var(--font-display); font-weight: 800; font-size: 1.9rem; font-variant-numeric: tabular-nums; min-width: 2.5ch; text-align: right; }
+.sval.blank { color: var(--muted); opacity: 0.6; }
+.sitem.sel .sval::after { content: ""; display: inline-block; width: 3px; height: 1.4rem; background: var(--accent); margin-left: 3px; vertical-align: -2px; }
+@media (prefers-reduced-motion: no-preference) {
+  .sitem.sel .sval::after { animation: blink 1s steps(1) infinite; }
+  @keyframes blink { 50% { opacity: 0; } }
+}
+
+/* Numpad */
+.keypad { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+.key { min-height: 62px; border-radius: 12px; background: var(--key); border: 1px solid var(--line); font-family: var(--font-display); font-weight: 800; font-size: 1.9rem; }
+.key.fn { font-family: var(--font-body); font-size: 1.05rem; font-weight: 700; }
+.key.enter { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
+.key:active { transform: scale(0.97); }
+.alldone { text-align: center; color: var(--lead); font-weight: 700; margin: 0; }
+
+/* First screen: header to "Nästa runda" fills exactly one phone screen */
+.screen { display: flex; flex-direction: column; gap: 10px; }
+.scorepanel { padding: 12px; gap: 8px; }
+.scorepanel h2 { font-size: 1.1rem; }
+@media (max-width: 700px) {
+  .screen {
+    height: calc(100vh - var(--pt) - 12px);
+    height: calc(100svh - var(--pt) - 12px);
+    min-height: 500px;
+  }
+  .screen .roundnum { font-size: 2rem; }
+  .screen .roundmeta { margin-top: 2px; }
+  .screen .wildcard { width: 50px; height: 70px; }
+  .screen .wildcard .s { font-size: 1.5rem; }
+  .scorepanel { flex: 1 1 auto; min-height: 0; }
+  .scorepanel .slist { flex: 0 1 auto; min-height: 0; overflow-y: auto; }
+  .scorepanel .sitem { min-height: 46px; padding-block: 4px; }
+  .scorepanel .sval { font-size: 1.6rem; }
+  .scorepanel .keypad { flex: 1 1 auto; min-height: 180px; grid-auto-rows: 1fr; }
+  .scorepanel .key { min-height: 0; }
+  .nextbtn { flex: none; }
+}
+
+/* Leaderboard */
+.lb { display: flex; flex-direction: column; }
+.lrow { display: grid; grid-template-columns: 30px 1fr auto; gap: 10px; align-items: center; padding: 10px 4px; }
+.lrow + .lrow { border-top: 1px solid var(--line); }
+.lrow.first { background: var(--lead-soft); border-radius: 10px; padding-inline: 10px; margin-inline: -6px; }
+.lrow.first + .lrow { border-top-color: transparent; }
+.place { font-family: var(--font-display); font-weight: 800; font-size: 1.2rem; color: var(--muted); }
+.lrow.first .place, .lrow.first .ltotal { color: var(--lead); }
+.lname { font-weight: 700; font-size: 1.1rem; min-width: 0; overflow-wrap: anywhere; }
+.ltotal { font-family: var(--font-display); font-weight: 800; font-size: 1.5rem; font-variant-numeric: tabular-nums; }
+.ldelta { font-size: 0.85rem; color: var(--muted); font-weight: 600; margin-left: 6px; }
+.headrow { display: flex; justify-content: space-between; align-items: center; gap: 10px; flex-wrap: wrap; }
+
+/* Round table */
+.tablewrap { overflow-x: auto; }
+table { border-collapse: collapse; width: 100%; font-variant-numeric: tabular-nums; font-size: 1rem; }
+th, td { padding: 8px 6px; text-align: right; white-space: nowrap; border-bottom: 1px solid var(--line); }
+th:first-child, td:first-child { text-align: left; color: var(--muted); }
+thead th { font-weight: 700; font-size: 0.9rem; max-width: 110px; overflow: hidden; text-overflow: ellipsis; }
+tfoot td { font-family: var(--font-display); font-weight: 800; font-size: 1.2rem; border-bottom: 0; color: var(--ink); }
+
+/* Past games */
+.games { display: flex; flex-direction: column; gap: 8px; }
+.game { border: 1px solid var(--line); border-radius: 12px; overflow: hidden; }
+.gsum { display: grid; grid-template-columns: 1fr auto; gap: 4px 10px; align-items: center; width: 100%; text-align: left; padding: 12px 14px; }
+.gdate { font-size: 0.85rem; color: var(--muted); font-weight: 600; }
+.gwin { font-weight: 700; font-size: 1.05rem; overflow-wrap: anywhere; min-width: 0; }
+.gwin b { color: var(--lead); }
+.garrow { grid-row: 1 / span 3; grid-column: 2; color: var(--muted); font-size: 1.1rem; }
+.gall { font-size: 0.9rem; color: var(--muted); font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+.gdetail { padding: 0 14px 12px; }
+
+/* Finish */
+.winner { text-align: center; background: var(--lead-soft); border-radius: 16px; padding: 18px; }
+.winner .big { font-family: var(--font-display); font-weight: 800; font-size: clamp(2.2rem, 12vw, 3.2rem); line-height: 1.05; color: var(--lead); overflow-wrap: anywhere; }
+.row2 { display: grid; grid-template-columns: 1fr 1.4fr; gap: 10px; }
+.foot { display: flex; justify-content: center; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <main id="app"></main>
+</div>
+
+<script>
+/* ---------- Supabase (public publishable key: safe to ship in a public page; access is limited by RLS) ---------- */
+const SB_URL = 'https://dmczyqpmcmykrnnmujga.supabase.co';
+const SB_KEY = 'sb_publishable_4fPCrZdOlNMuvIQ1NPTvAw_q2RkX4g0';
+const SB_TABLE = SB_URL + '/rest/v1/trixie_games';
+const SB_HEADERS = { apikey: SB_KEY, 'Content-Type': 'application/json' };
+
+const RANKS = ['3','4','5','6','7','8','9','10','Kn','D','K'];
+const WILD = ['Treor','Fyror','Femmor','Sexor','Sjuor','Åttor','Nior','Tior','Knektar','Damer','Kungar'];
+const ROUNDS = 11;
+const KEY = 'trixie-game-v1';
+const $ = s => document.querySelector(s);
+const esc = s => String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const newId = () => (crypto.randomUUID ? crypto.randomUUID() :
+  'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, c => { const r = Math.random() * 16 | 0; return (c === 'x' ? r : (r & 3 | 8)).toString(16); }));
+
+function freshState() {
+  return { phase: 'setup', setup: { names: ['', ''], dealer: 0 }, gameId: null, players: [], dealer: 0, round: 0, rounds: [], draft: [], sel: 0, updatedAt: 0 };
+}
+function normalize(s) {
+  if (s.phase === 'score') s.phase = 'play';
+  if (s.phase === 'play' && (!Array.isArray(s.draft) || s.draft.length !== s.players.length)) s.draft = s.players.map(() => '');
+  if (s.sel === undefined) s.sel = 0;
+  if (s.phase !== 'setup' && !s.gameId) s.gameId = newId();
+  return s;
+}
+let state = freshState();
+try { const s = JSON.parse(localStorage.getItem(KEY)); if (s && s.phase) state = normalize(s); } catch (e) {}
+let showAll = false, replaceNext = false;
+let history = { loading: true, error: false, games: [], open: null };
+
+/* ---------- saving: on the phone right away, and to Supabase shortly after ---------- */
+let saveTimer = null, saving = false, again = false, dirty = false;
+let statusText = 'Ansluter…', statusWarn = false;
+function setStatus(t, warn) { statusText = t; statusWarn = !!warn; const el = $('#status'); if (el) { el.textContent = t; el.classList.toggle('warn', statusWarn); } }
+function persist() {
+  state.updatedAt = Date.now();
+  try { localStorage.setItem(KEY, JSON.stringify(state)); } catch (e) {}
+  if (state.gameId && state.phase !== 'setup') { dirty = true; clearTimeout(saveTimer); saveTimer = setTimeout(flush, 700); }
+}
+function winnerText() {
+  if (state.phase !== 'done') return null;
+  return standings().filter(o => o.place === 1).map(o => o.name).join(' & ');
+}
+async function flush() {
+  if (!dirty || !state.gameId) return;
+  if (saving) { again = true; return; }
+  saving = true; dirty = false;
+  const wasDone = state.phase === 'done';
+  const body = {
+    id: state.gameId,
+    finished: wasDone,
+    players: state.players.map(p => p.name),
+    rounds: state.rounds,
+    winner: winnerText(),
+    state: state
+  };
+  try {
+    const r = await fetch(SB_TABLE + '?on_conflict=id', {
+      method: 'POST',
+      headers: { ...SB_HEADERS, Prefer: 'resolution=merge-duplicates,return=minimal' },
+      body: JSON.stringify(body)
+    });
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    setStatus('Sparat online');
+    if (wasDone) loadHistory();
+  } catch (e) {
+    dirty = true;
+    setStatus('Sparat i telefonen – sparas online när nätet är tillbaka', true);
+  }
+  saving = false;
+  if (again) { again = false; flush(); }
+}
+window.addEventListener('online', () => { if (dirty) flush(); });
+setInterval(() => { if (dirty && !saving) flush(); }, 30000);
+
+async function loadHistory() {
+  try {
+    const r = await fetch(SB_TABLE + '?select=id,created_at,players,rounds,winner&finished=eq.true&order=created_at.desc&limit=50', { headers: SB_HEADERS });
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    history.games = await r.json(); history.error = false;
+    if (!dirty) setStatus('Sparat online');
+  } catch (e) {
+    history.error = true;
+    if (!dirty) setStatus('Ingen anslutning – sparas i telefonen', true);
+  }
+  history.loading = false;
+  renderHistoryOnly();
+}
+
+/* ---------- keep the screen awake while playing ---------- */
+let lock = null;
+async function wake() {
+  try { if (!lock && navigator.wakeLock) { lock = await navigator.wakeLock.request('screen'); lock.addEventListener('release', () => lock = null); } } catch (e) {}
+}
+document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible' && state.phase !== 'setup') wake(); });
+
+/* ---------- helpers ---------- */
+const n = () => state.players.length;
+const sumCols = (rounds, count) => Array.from({ length: count }, (_, i) => rounds.reduce((a, r) => a + (r[i] || 0), 0));
+const totals = () => sumCols(state.rounds, n());
+const decksFor = c => Math.max(2, Math.ceil((c * 13 + 20) / 52));
+const defName = i => 'Spelare ' + (i + 1);
+const blank = v => v === '' || v == null;
+const wildCard = r => `<div class="wildcard" aria-hidden="true"><span class="r">${RANKS[r]}</span><span class="s">♦</span><span class="r b">${RANKS[r]}</span></div>`;
+const fmtDate = iso => { try { return new Date(iso).toLocaleDateString('sv-SE', { weekday: 'short', day: 'numeric', month: 'long', year: 'numeric' }); } catch (e) { return ''; } };
+
+function roundTable(names, rounds) {
+  const t = sumCols(rounds, names.length);
+  return `
+  <div class="tablewrap">
+    <table>
+      <thead><tr><th>Runda</th>${names.map(nm => `<th title="${esc(nm)}">${esc(nm)}</th>`).join('')}</tr></thead>
+      <tbody>${rounds.map((r, ri) => `<tr><td>${ri + 1}</td>${r.map(v => `<td>${v}</td>`).join('')}</tr>`).join('')}</tbody>
+      <tfoot><tr><td>Summa</td>${t.map(v => `<td>${v}</td>`).join('')}</tr></tfoot>
+    </table>
+  </div>`;
+}
+
+/* ---------- views ---------- */
+const viewHeader = () => `
+  <header class="top">
+    <div class="brand"><span class="pip" aria-hidden="true">♦</span>Trixie</div>
+    <span class="status ${statusWarn ? 'warn' : ''}" id="status">${esc(statusText)}</span>
+  </header>`;
+
+function viewSetup() {
+  const s = state.setup, names = s.names;
+  return `
+  ${viewHeader()}
+  <section class="panel">
+    <h2>Vilka spelar?</h2>
+    <p class="hint">Skriv namnen i den ordning ni sitter runt bordet. Utdelningen går vidare i den ordningen.</p>
+    <div class="names">
+      ${names.map((v, i) => `
+      <div class="namerow">
+        <span class="seat">${i + 1}</span>
+        <input id="name-${i}" data-name="${i}" value="${esc(v)}" placeholder="${defName(i)}" autocomplete="off" enterkeyhint="next" aria-label="Namn på spelare ${i + 1}">
+        <button class="rm" data-act="rm" data-i="${i}" aria-label="Ta bort spelare ${i + 1}" ${names.length <= 2 ? 'disabled' : ''}>×</button>
+      </div>`).join('')}
+    </div>
+    <button class="btn secondary" data-act="add">+ Lägg till spelare</button>
+    <div class="field">
+      <label class="label" for="firstDealer">Vem delar ut först?</label>
+      <select id="firstDealer">
+        ${names.map((v, i) => `<option value="${i}" ${i === s.dealer ? 'selected' : ''}>${esc(v.trim() || defName(i))}</option>`).join('')}
+      </select>
+    </div>
+    <p class="hint">${names.length} spelare: blanda ihop ${decksFor(names.length)} kortlekar.</p>
+    <button class="btn primary full" data-act="start">Starta spelet</button>
+  </section>
+  <div id="history">${viewHistory()}</div>
+  <section class="panel">
+    <h2>De 11 rundorna</h2>
+    <p class="hint">Varje runda delas ett kort mer ut, och jokern är samma valör som antalet kort.</p>
+    <div class="guide">
+      ${RANKS.map((r, i) => `<div class="gcell"><span>Runda ${i + 1}</span><b>${i + 3} kort</b><span>Joker: ${WILD[i].toLowerCase()}</span></div>`).join('')}
+    </div>
+  </section>`;
+}
+
+function viewRoundBar() {
+  const r = state.round;
+  return `
+  <div class="roundbar">
+    <div>
+      <div class="label">Runda</div>
+      <div class="roundnum">${r + 1} <small>av ${ROUNDS}</small></div>
+      <div class="roundmeta">Dela ut ${r + 3} kort var</div>
+    </div>
+    <div class="wildwrap">
+      <div class="wildtext">Joker<b>${WILD[r]}</b></div>
+      ${wildCard(r)}
+    </div>
+  </div>`;
+}
+
+function viewPlay() {
+  const p = state.players, d = state.draft, sel = state.sel;
+  const last = state.round + 1 === ROUNDS;
+  return `
+  <div class="screen">
+    ${viewHeader()}
+    ${viewRoundBar()}
+    <div class="dealer"><span class="label">Delar ut</span><span class="who">${esc(p[state.dealer].name)}</span></div>
+    <section class="panel scorepanel">
+      <h2>Poäng runda ${state.round + 1}</h2>
+      <div class="slist">
+        ${p.map((pl, i) => `
+        <button class="sitem ${i === sel ? 'sel' : ''}" data-act="pick" data-i="${i}" aria-label="${esc(pl.name)}: ${blank(d[i]) ? 'inga poäng än' : d[i] + ' poäng'}">
+          <span class="sname">${esc(pl.name)}</span>
+          <span class="sval ${blank(d[i]) && i !== sel ? 'blank' : ''}">${blank(d[i]) ? (i === sel ? '' : '–') : esc(d[i])}</span>
+        </button>`).join('')}
+      </div>
+      ${sel == null ? '<p class="alldone">Alla poäng inskrivna. Tryck på ett namn för att ändra.</p>' : ''}
+      <div class="keypad" aria-label="Sifferknappar">
+        ${[1,2,3,4,5,6,7,8,9].map(k => `<button class="key" data-act="digit" data-i="${k}">${k}</button>`).join('')}
+        <button class="key fn" data-act="del" aria-label="Sudda">⌫</button>
+        <button class="key" data-act="digit" data-i="0">0</button>
+        <button class="key fn enter" data-act="enter">Enter ⏎</button>
+      </div>
+    </section>
+    <button class="btn primary full nextbtn" data-act="nextround">${last ? 'Avsluta spelet' : 'Nästa runda →'}</button>
+  </div>
+  ${viewLeaderboard()}
+  <div id="history">${viewHistory()}</div>
+  ${viewFooter()}`;
+}
+
+function standings() {
+  const t = totals();
+  const order = state.players.map((pl, i) => ({ i, name: pl.name, total: t[i] })).sort((a, b) => a.total - b.total);
+  let place = 0, prev = null;
+  order.forEach((o, k) => { if (o.total !== prev) { place = k + 1; prev = o.total; } o.place = place; });
+  return order;
+}
+
+function viewLeaderboard(forceAll) {
+  const R = state.rounds;
+  if (!R.length) return `<section class="panel"><h2>Ställning</h2><p class="hint">Ställningen visas här efter första rundan.</p></section>`;
+  const order = standings(), lastR = R[R.length - 1];
+  const all = forceAll || showAll;
+  return `
+  <section class="panel">
+    <div class="headrow"><h2>Ställning</h2>${state.phase === 'play' ? '<button class="link" data-act="undo">Ändra förra rundan</button>' : ''}</div>
+    <div class="lb">
+      ${order.map(o => `
+      <div class="lrow ${o.place === 1 ? 'first' : ''}">
+        <span class="place">${o.place}</span>
+        <span class="lname">${esc(o.name)}<span class="ldelta">+${lastR[o.i]} förra</span></span>
+        <span class="ltotal">${o.total}</span>
+      </div>`).join('')}
+    </div>
+    ${all ? roundTable(state.players.map(p => p.name), R) : ''}
+    ${forceAll ? '' : `<button class="btn secondary full" data-act="toggleall" aria-expanded="${all}">${all ? 'Dölj rundorna ▲' : `Visa alla rundor (${R.length}) ▼`}</button>`}
+  </section>`;
+}
+
+function viewHistory() {
+  let body;
+  if (history.loading) body = '<p class="hint">Hämtar tidigare spel…</p>';
+  else if (history.error && !history.games.length) body = '<p class="hint">Kunde inte hämta tidigare spel. Kontrollera internetanslutningen.</p>';
+  else if (!history.games.length) body = '<p class="hint">Inga avslutade spel än. När ett spel är klart sparas det här.</p>';
+  else body = `<div class="games">${history.games.map(g => {
+    const names = Array.isArray(g.players) ? g.players : [];
+    const rounds = Array.isArray(g.rounds) ? g.rounds : [];
+    const t = sumCols(rounds, names.length);
+    const best = t.length ? Math.min(...t) : 0;
+    const open = history.open === g.id;
+    const all = names.map((nm, i) => ({ nm, v: t[i] })).sort((a, b) => a.v - b.v).map(o => `${esc(o.nm)} ${o.v}`).join(' · ');
+    return `
+    <div class="game">
+      <button class="gsum" data-act="opengame" data-id="${esc(g.id)}" aria-expanded="${open}">
+        <span class="gdate">${esc(fmtDate(g.created_at))}</span>
+        <span class="garrow" aria-hidden="true">${open ? '▲' : '▼'}</span>
+        <span class="gwin">Vinnare: <b>${esc(g.winner || '')}</b> (${best})</span>
+        <span class="gall">${all}</span>
+      </button>
+      ${open ? `<div class="gdetail">${roundTable(names, rounds)}</div>` : ''}
+    </div>`; }).join('')}</div>`;
+  return `<section class="panel"><h2>Tidigare spel</h2>${body}</section>`;
+}
+function renderHistoryOnly() { const el = $('#history'); if (el) el.innerHTML = viewHistory(); }
+
+function viewDone() {
+  const order = standings(), winners = order.filter(o => o.place === 1);
+  return `
+  ${viewHeader()}
+  <section class="winner">
+    <div class="label">${winners.length > 1 ? 'Delad vinst' : 'Vinnare'}</div>
+    <div class="big">${winners.map(w => esc(w.name)).join(' & ')}</div>
+    <div class="hint">${winners[0].total} poäng efter ${ROUNDS} rundor</div>
+  </section>
+  ${viewLeaderboard(true)}
+  <div class="row2">
+    <button class="btn secondary" data-act="undo">Ändra sista rundan</button>
+    <button class="btn primary" data-act="again">Spela igen</button>
+  </div>
+  <div id="history">${viewHistory()}</div>
+  ${viewFooter()}`;
+}
+
+let confirmNew = false, confirmTimer = null;
+function viewFooter() {
+  return `<div class="foot"><button class="link ${confirmNew ? 'danger' : 'quiet'}" data-act="newgame">${confirmNew ? 'Tryck igen för att avsluta spelet' : 'Nytt spel'}</button></div>`;
+}
+
+function render() {
+  const views = { setup: viewSetup, play: viewPlay, done: viewDone };
+  $('#app').innerHTML = (views[state.phase] || viewSetup)();
+}
+
+/* ---------- actions ---------- */
+function beginRound() { state.draft = state.players.map(() => ''); state.sel = 0; replaceNext = false; state.phase = 'play'; }
+const actions = {
+  add() { state.setup.names.push(''); persist(); render(); $('#name-' + (state.setup.names.length - 1)).focus(); },
+  rm(i) { const s = state.setup; if (s.names.length <= 2) return; s.names.splice(i, 1); if (s.dealer >= s.names.length) s.dealer = 0; persist(); render(); },
+  start() {
+    const s = state.setup;
+    state.gameId = newId();
+    state.players = s.names.map((v, i) => ({ name: v.trim() || defName(i) }));
+    state.dealer = s.dealer; state.round = 0; state.rounds = [];
+    beginRound(); persist(); render(); wake(); window.scrollTo(0, 0);
+  },
+  pick(i) { state.sel = i; replaceNext = true; persist(); render(); },
+  digit(k) {
+    if (state.sel == null) return;
+    const i = state.sel; let v = state.draft[i] || '';
+    if (v === '0' || replaceNext) v = '';
+    replaceNext = false;
+    if (v.length >= 3) return;
+    state.draft[i] = v + k; persist(); render();
+  },
+  del() {
+    if (state.sel == null) return;
+    replaceNext = false;
+    state.draft[state.sel] = (state.draft[state.sel] || '').slice(0, -1); persist(); render();
+  },
+  enter() {
+    if (state.sel == null) return;
+    const i = state.sel;
+    if (blank(state.draft[i])) state.draft[i] = '0';
+    const nextBlank = state.draft.findIndex((v, k) => k > i && blank(v));
+    const anyBlank = state.draft.findIndex(v => blank(v));
+    state.sel = nextBlank >= 0 ? nextBlank : (anyBlank >= 0 ? anyBlank : null);
+    replaceNext = false;
+    persist(); render();
+  },
+  nextround() {
+    state.rounds[state.round] = state.players.map((_, i) => { const v = parseInt(state.draft[i], 10); return isNaN(v) ? 0 : v; });
+    state.rounds.length = state.round + 1;
+    if (state.round + 1 >= ROUNDS) { state.phase = 'done'; state.draft = []; }
+    else { state.round++; state.dealer = (state.dealer + 1) % n(); beginRound(); }
+    persist(); render(); window.scrollTo(0, 0);
+  },
+  undo() {
+    if (!state.rounds.length) return;
+    if (state.phase === 'play') { state.round--; state.dealer = (state.dealer - 1 + n()) % n(); }
+    state.draft = state.rounds[state.round].map(String);
+    state.rounds.length = state.round;
+    state.sel = 0; replaceNext = true; state.phase = 'play';
+    persist(); render(); window.scrollTo(0, 0);
+  },
+  toggleall() { showAll = !showAll; render(); },
+  opengame(_, el) { const id = el.dataset.id; history.open = history.open === id ? null : id; renderHistoryOnly(); },
+  again() {
+    state.gameId = newId();
+    state.dealer = (state.dealer + 1) % n(); state.round = 0; state.rounds = []; showAll = false;
+    beginRound(); persist(); render(); window.scrollTo(0, 0);
+  },
+  newgame() {
+    if (!confirmNew) {
+      confirmNew = true; render();
+      clearTimeout(confirmTimer); confirmTimer = setTimeout(() => { confirmNew = false; render(); }, 4000);
+      return;
+    }
+    confirmNew = false; clearTimeout(confirmTimer);
+    if (dirty) flush();
+    const names = state.players.map(p => p.name);
+    state = freshState(); showAll = false;
+    if (names.length >= 2) state.setup.names = names;
+    persist(); render(); window.scrollTo(0, 0);
+  }
+};
+
+document.addEventListener('click', e => {
+  const b = e.target.closest('[data-act]');
+  if (!b || b.disabled) return;
+  const fn = actions[b.dataset.act];
+  if (fn) fn(b.dataset.i != null ? +b.dataset.i : undefined, b);
+});
+document.addEventListener('input', e => {
+  const t = e.target;
+  if (t.dataset.name != null) {
+    const i = +t.dataset.name; state.setup.names[i] = t.value;
+    const opt = $('#firstDealer')?.options[i]; if (opt) opt.textContent = t.value.trim() || defName(i);
+    persist();
+  }
+});
+document.addEventListener('change', e => {
+  if (e.target.id === 'firstDealer') { state.setup.dealer = +e.target.value; persist(); }
+});
+document.addEventListener('keydown', e => {
+  const t = e.target;
+  if (e.key === 'Enter' && t.dataset && t.dataset.name != null) {
+    e.preventDefault(); const nx = $('#name-' + (+t.dataset.name + 1)); if (nx) nx.focus(); else actions.add(); return;
+  }
+  if (state.phase === 'play' && !(t instanceof HTMLInputElement)) {
+    if (/^[0-9]$/.test(e.key)) { actions.digit(+e.key); e.preventDefault(); }
+    else if (e.key === 'Backspace') { actions.del(); e.preventDefault(); }
+    else if (e.key === 'Enter' && !(t instanceof HTMLButtonElement)) { actions.enter(); e.preventDefault(); }
+  }
+});
+
+render();
+loadHistory();
+if (state.gameId && state.phase !== 'setup') { dirty = true; flush(); }
+</script>
+</body>
+</html>
